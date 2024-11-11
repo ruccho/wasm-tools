@@ -8,6 +8,7 @@ use wast::token::{Span, F32, F64};
 use wast::{
     QuoteWat, QuoteWatTest, Wast, WastArg, WastDirective, WastExecute, WastInvoke, WastRet,
 };
+use wast::component::WastVal;
 
 /// Convert a `*.wast` WebAssembly spec test into a `*.json` file and `*.wasm`
 /// files.
@@ -362,6 +363,10 @@ impl<'a> JsonBuilder<'a> {
         for arg in args {
             let arg = match arg {
                 WastArg::Core(core) => core,
+                WastArg::Component(component) => {
+                    ret.push(self.component_to_json(component)?);
+                    continue;
+                },
                 _ => bail!("encountered unsupported Wast argument: {arg:?}"),
             };
             let val = match arg {
@@ -419,6 +424,7 @@ impl<'a> JsonBuilder<'a> {
         for r in rets {
             let r = match r {
                 WastRet::Core(core) => self.core_ret(core)?,
+                WastRet::Component(component) => self.component_to_json(component)?,
                 _ => bail!("encountered unsupported Wast result: {r:?}"),
             };
             ret.push(r);
@@ -501,7 +507,15 @@ impl<'a> JsonBuilder<'a> {
         })
     }
 
+    fn print_u8(&self, i: u8) -> String {
+        i.to_string()
+    }
+
     fn print_i8(&self, i: i8) -> String {
+        i.to_string()
+    }
+
+    fn print_u16(&self, i: u16) -> String {
         i.to_string()
     }
 
@@ -509,12 +523,59 @@ impl<'a> JsonBuilder<'a> {
         i.to_string()
     }
 
+    fn print_u32(&self, i: u32) -> String {
+        i.to_string()
+    }
+
     fn print_i32(&self, i: i32) -> String {
+        i.to_string()
+    }
+
+    fn print_u64(&self, i: u64) -> String {
         i.to_string()
     }
 
     fn print_i64(&self, i: i64) -> String {
         i.to_string()
+    }
+
+    fn print_bool(&self, i: bool) -> String {
+        (if i { "true" } else {"false"}).to_string()
+    }
+
+    fn print_char(&self, i: char) -> String {
+        i.to_string()
+    }
+
+    fn component_to_json(&self, value: WastVal<'a>) -> Result<json::Const<'a>> {
+        Ok(match value {
+            WastVal::Bool(i) => json::Const::Bool { value: self.print_bool(i) },
+            WastVal::U8(i) => json::Const::U8 { value: self.print_u8(i) },
+            WastVal::S8(i) => json::Const::S8 { value: self.print_i8(i) },
+            WastVal::U16(i) => json::Const::U16 { value: self.print_u16(i) },
+            WastVal::S16(i) => json::Const::S16 { value: self.print_i16(i) },
+            WastVal::U32(i) => json::Const::U32 { value: self.print_u32(i) },
+            WastVal::S32(i) => json::Const::S32 { value: self.print_i32(i) },
+            WastVal::U64(i) => json::Const::U64 { value: self.print_u64(i) },
+            WastVal::S64(i) => json::Const::S64 { value: self.print_i64(i) },
+            WastVal::F32(i) => json::Const::F32 { value: f32_to_string(i) },
+            WastVal::F64(i) => json::Const::F64 { value: f64_to_string(i) },
+            WastVal::Char(i) => json::Const::Char { value: self.print_char(i) },
+            WastVal::String(i) => json::Const::String { value: i.to_string() },
+            WastVal::List(i) => json::Const::List { value: i.into_iter().map(|i| self.component_to_json(i)).collect::<Result<_>>()? },
+            WastVal::Record(i) => json::Const::Record { value: i.into_iter().map(|(k, v)| Ok((k.to_string(), self.component_to_json(v)?))).collect::<Result<_>>()? },
+            WastVal::Tuple(i) => json::Const::Tuple { value: i.into_iter().map(|i| self.component_to_json(i)).collect::<Result<_>>()? },
+            WastVal::Variant(case, i) => json::Const::Variant { case: case.to_string(), value: i.map(|i| Box::new(self.component_to_json(*i).unwrap())) },
+            WastVal::Enum(i) => json::Const::Enum { value: i.to_string() },
+            WastVal::Option(i) => json::Const::Option { value: i.map(|i| Box::new(self.component_to_json(*i).unwrap())) },
+            WastVal::Result(i) => {
+                match i {
+                    Ok(i) => json::Const::Result { ok: i.map(|i| Box::new(self.component_to_json(*i).unwrap())), error: None },
+                    Err(i) => json::Const::Result { ok: i.map(|i| Box::new(self.component_to_json(*i).unwrap())), error: None },
+                }
+            },
+            WastVal::Flags(i) => json::Const::Flags(i.into_iter().map(|i| i.to_string()).collect()),
+        })
     }
 }
 
@@ -762,5 +823,69 @@ mod json {
 
         // any null reference, type doesn't matter
         RefNull,
+
+        Bool {
+            value: String,
+        },
+        U8 {
+            value: String,
+        },
+        S8 {
+            value: String,
+        },
+        U16 {
+            value: String,
+        },
+        S16 {
+            value: String,
+        },
+        U32 {
+            value: String,
+        },
+        S32 {
+            value: String,
+        },
+        U64 {
+            value: String,
+        },
+        S64 {
+            value: String,
+        },
+        Char {
+            value: String,
+        },
+        String {
+            value: String,
+        },
+        List {
+            value: Vec<Const<'a>>
+        },
+        Record {
+            value: Vec<(String, Const<'a>)>
+        },
+        Tuple {
+            value: Vec<Const<'a>>
+        },
+        Variant {
+            case: String,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            value: Option<Box<Const<'a>>>,
+        },
+        Enum {
+            value: String,
+        },
+        Option {
+            #[serde(skip_serializing_if = "Option::is_none")]
+            value: Option<Box<Const<'a>>>
+        },
+        Result {
+            #[serde(skip_serializing_if = "Option::is_none")]
+            ok: Option<Box<Const<'a>>>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            error: Option<Box<Const<'a>>>,
+        },
+        Flags {
+            value: Vec<String>
+        },
     }
 }
